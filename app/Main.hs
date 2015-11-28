@@ -1,7 +1,9 @@
 module Main where
 
-import Lib
+import System.IO
+import Media.MpegTs
 import Options.Applicative
+import qualified Data.ByteString.Lazy as BL
 
 {-
 Data type to hold the command line optio
@@ -26,7 +28,11 @@ parseOptions = Options
 -- Actual program logic
 run :: Options -> IO ()
 run opts = do
-  putStrLn (input opts)
+  putStrLn $ "Reading file " ++ (input opts)
+  withBinaryFile (input opts) ReadMode (\handle -> do
+      input <- BL.hGetContents handle
+      putStrLn $ show (tsPacketList input 0)
+      putStrLn "done.")
 
 main :: IO ()
 main = execParser opts >>= run
