@@ -1,43 +1,37 @@
 module Main where
 
 import Lib
-import System.Console.ArgParser
-import Text.Format
-import Control.Applicative
-import Data.Typeable
+import Options.Applicative
 
 {-
 Data type to hold the command line optio
 -}
-data MyConfig = MyConfig {
-                           input :: String,
-                           verbose :: Bool
-                          } deriving Show
+data Options = Options { input :: String
+                       , verbose :: Bool
+                       } deriving Show
 
 {-
-Define the command line arguments
+Option Parser
 -}
-parser :: ParserSpec MyConfig
-parser = MyConfig
-  `parsedBy` reqPos "input" `Descr` "Input MpegTs file"
-  `andBy` boolFlag "verbose" `Descr` "Verbose output"
+parseOptions :: Parser Options
+parseOptions = Options
+  <$> strArgument 
+      ( metavar "INPUT"
+     <> help "The input file" )
+  <*> switch
+      ( long "verbose"
+     <> short 'v'
+     <> help "Enable verbose mode" )
 
-{-
-Define the Interface to gather the Configuration Parameters
--}
-commandLineInterface :: IO (CmdLnInterface MyConfig)
-commandLineInterface = 
-  (`setAppDescr` "Parser for printing out information about an MpegTS file")
-  <$> (`setAppEpilog` "Kevin S Kirkup")
-  <$> mkApp parser
-
-
-printCommandLineArgs :: MyConfig -> IO ()
-printCommandLineArgs = putStrLn . input
+-- Actual program logic
+run :: Options -> IO ()
+run opts = do
+  putStrLn (input opts)
 
 main :: IO ()
-main = do
-  interface <- commandLineInterface
-  runApp interface printCommandLineArgs
-  someFunc
-
+main = execParser opts >>= run
+  where
+    opts = info (helper <*> parseOptions)
+      ( fullDesc
+     <> progDesc "Parse the specified MpegTS file"
+     <> header "mpegts-hs - a parser for MpegTS streams" )
