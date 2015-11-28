@@ -1,6 +1,6 @@
 name:                mpegts-hs
 version:             0.1.0.0
-synopsis:            Initial project template from stack
+synopsis:            MpegTS Parser
 description:         Please see README.md
 homepage:            http://github.com/kevinkirkup/mpegts-hs#readme
 license:             BSD3
@@ -19,13 +19,14 @@ library
   build-depends:       base >= 4.7 && < 5
   default-language:    Haskell2010
 
-executable mpegts-hs-exe
+executable mpegts-hs
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base
                      , mpegts-hs
                      , argparser
+                     , text-format-simple
   default-language:    Haskell2010
 
 test-suite mpegts-hs-test
