@@ -5,7 +5,8 @@ module Media.MpegTs
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.Binary.Get
+import Data.Binary.Strict.Get
+import qualified Data.Binary.Get as BG
 import Data.Word
 import Data.Bits
 import Control.Monad (when)
@@ -43,33 +44,43 @@ Find Sync Word
 scanForSyncWord :: BS.ByteString -> ByteOffset
 scanForSyncWord _ = 0
 
+adaptationField :: BS.ByteString -> AdaptationField
+adaptationField _ = undefined
+
 {-
 Decode the MpegTS Packets
 -}
 tsPacketParser :: Get TransportPacket
 tsPacketParser = do
     checkSyncByte
-    (ps, pid) <- parsePID
-    (ad, cc)  <- parseAD
-    let pack = TransportPacket ps True False pid 0 0 cc
+    (tei, pusi, tp, pid, tsc, ad, cc) <- parseHeader
+    let pack = TransportPacket tei pusi tp pid tsc ad cc
     case ad of
-       _ -> do d <- getByteString 184
-               return$ pack Nothing (Just d)
-     where
-        checkSyncByte =
-          do sync <- getWord8
-             when (sync /= 0x47) (fail$ "bad sync byte " ++ show sync) -- checkSyncByte
-        parsePID =
-          do chunk <- getWord16be
-             let ps  = testBit chunk 14
-                 pid = 0x1FFF .&. chunk
-             return (ps, pid)
-        parseAD =
-          do byte <- getWord8
-             let ad = (shiftR (0x30 .&. byte) 4)
-                 cc = (0x07 .&. byte)
-             return (ad,cc)
-  
+      0 -> fail (show (pack Nothing Nothing) ++ ": wrong adaptation field code")
+      2 -> do af <- adaptationField
+              skip (184-(ad_len af)-1)
+              return$ pack (Just af) Nothing
+      3 -> do af <- adaptationField
+              d  <- getByteString (184-(ad_len af)-1)
+              return$ pack (Just af) (Just d)
+      _ -> do d <- getByteString 184
+              return$ pack Nothing (Just d)
+    where
+      checkSyncByte = do
+        sync <- getWord8
+        when (sync /= 0x47) (fail$ "bad sync byte " ++ show sync) -- checkSyncByte
+      parseHeader = do
+        chunk <- getWord16be
+        let tei  = (0x8000 .&. chunk) == 0x8000
+            pusi = (0x4000 .&. chunk) == 0x4000
+            tp   = (0x2000 .&. chunk) == 0x2000
+            pid  = 0x1FFF .&. chunk
+        byte <- getWord8
+        let tsc = (shiftR byte 6) .&. 0x03
+            ad = (shiftR byte 4) .&. 0x03
+            cc = (0x0F .&. byte)
+        return (tei, pusi, tp, pid, tsc, ad, cc)
+
 
 tsPacketList :: BL.ByteString -> ByteOffset -> [TransportPacket]
 tsPacketList bytestring offset =

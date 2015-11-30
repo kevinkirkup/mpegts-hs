@@ -11,6 +11,7 @@ packages:
 extra-deps:
   - text-format-simple-1.1.0
   - bytestring-0.10.6.0
+  - binary-strict-0.4.7
 
 # Override default flag values for local packages and extra-deps
 flags: {}
