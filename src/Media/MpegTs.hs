@@ -83,11 +83,68 @@ Adaptation Field Control Flags
 data AdaptationFieldControl = Reserved | Payload_Only | Adaptation_Field_Only | Adaptation_Field_And_Payload
   deriving (Enum, Show, Eq, Ord, Bounded)
 
+type PCRBase = Word64
+type PCRExtension = Word16
+
+data ProgramClockReference = ProgramClockReference
+  { base      :: !PCRBase
+  , extension :: !PCRExtension
+  } deriving (Show)
+
+{-
+Decode PCR values
+  -}
+pcrValue :: BG.BitGet ProgramClockReference
+pcrValue = do
+  base <- BG.getAsWord64 33
+  reserved <- BG.getAsWord8 6
+  extension <- BG.getAsWord16 9
+
+  return $ ProgramClockReference base extension
+
 {-
 Decode the Adaptation Field
 -}
-adaptationField :: G.Get AdaptationField
-adaptationField = return $ defaultAdaptationField
+adaptationField :: BG.BitGet AdaptationField
+adaptationField = do
+  length <- BG.getWord8
+  discontinuity_indicator <- BG.getBit
+  random_access_indicator <- BG.getBit
+  elementary_stream_priority_indicator <- BG.getBit
+  pcr_flag <- BG.getBit
+  opcr_flag <- BG.getBit
+  splicing_point_flag <- BG.getBit
+  transport_private_data_flag <- BG.getBit
+  adaptation_field_extension_flag <- BG.getBit
+
+  return defaultAdaptationField
+
+{-
+  if PCR_flag == True
+    then pcr = pcrValue
+    else pcr = Nothing
+
+  if OPCR_flag == True
+    then opcr = pcrValue
+    else pcr = Nothing
+
+  if splicing_point_flag == True
+    then splice_countdown <- BG.getWord8
+    else splice_countdown <- Nothing
+
+  if transport_private_data_flag == True
+    then trasport_private_data <- (do
+      data_length <- BG.getWord8
+      private_data <- BG.getAsWord8 private_data_length
+      return $ Just private_data)
+    else transport_private_data <- return Nothing
+
+  if adaptation_field_extension_flag == True
+    then adaptation_field_extension <- (do
+        extension_length <-BG.getWord8
+        return adaptationFieldExtension)
+    else adaptation_field_extension <- return Nothing
+-}
 
 {-
 Decode the TS Packet Header
@@ -120,13 +177,24 @@ tsPacketParser = do
     Right x -> case (adaptation_field_control x) of
       Reserved -> fail (show (TransportPacket x Nothing Nothing) ++ ": wrong adaptation field code")
       Adaptation_Field_Only -> do
-        af <- adaptationField
-        G.skip (184 - (ad_len af) - 1)
-        return $ TransportPacket x (Just af) Nothing
+        ad_len <- (fromIntegral <$> G.getWord8)
+        ad_data <- G.getByteString ad_len
+        let af = BG.runBitGet ad_data adaptationField
+        case af of
+          Left error -> fail error
+          Right y -> do
+            G.skip (184 - ad_len - 1)
+            return $ TransportPacket x (Just y) Nothing
+
       Adaptation_Field_And_Payload -> do
-        af <- adaptationField
-        d  <- G.getByteString (184 - (ad_len af) - 1)
-        return $ TransportPacket x (Just af) (Just d)
+        ad_len <- (fromIntegral <$> G.getWord8)
+        ad_data <- G.getByteString ad_len
+        let af = BG.runBitGet ad_data adaptationField
+        case af of
+          Left error -> fail error
+          Right y -> do
+            d  <- G.getByteString (184 - ad_len - 1)
+            return $ TransportPacket x (Just y) (Just d)
       _ -> do
         d <- G.getByteString 184
         return $ TransportPacket x Nothing (Just d)
