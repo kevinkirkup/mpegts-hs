@@ -5,8 +5,8 @@ module Media.MpegTs
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import Data.Binary.Strict.Get
-import qualified Data.Binary.Get as BG
+import qualified Data.Binary.Strict.Get as G
+import qualified Data.Binary.Strict.BitGet as BG
 import Data.Word
 import Data.Bits
 import Control.Monad (when)
@@ -23,10 +23,7 @@ type TransportScramblingControl = Word8
 type AdaptationFieldControl = Word8
 type ContinuityCount = Word8
 
-data AdaptationField = AdaptationField BS.ByteString
-  deriving (Show)
-
-data TransportPacket = TransportPacket
+data TSHeader = TSHeader
   { transport_error_indicator    :: !TransportError
   , payload_unit_start_indicator :: !PayloadStart
   , transport_priority           :: !TransportPriority
@@ -34,59 +31,128 @@ data TransportPacket = TransportPacket
   , transport_scrambling_control :: !TransportScramblingControl
   , adaptation_field_control     :: !AdaptationFieldControl
   , continuity_counter           :: !ContinuityCount
+  } deriving (Show)
+
+defaultTSHeader = TSHeader False False False 0 0 0 0
+
+data TransportPacket = TransportPacket
+  { header                       :: TSHeader
   , adaptation_field             :: !(Maybe AdaptationField)
   , data_bytes                   :: !(Maybe Data)
   } deriving (Show)
 
-{-
-Find Sync Word
--}
-scanForSyncWord :: BS.ByteString -> ByteOffset
-scanForSyncWord _ = 0
+defaultTransportPacket = TransportPacket defaultTSHeader Nothing Nothing
 
-adaptationField :: BS.ByteString -> AdaptationField
-adaptationField _ = undefined
+data AdaptationFlags = AdaptationFlags
+    { af_discont      :: !Bool
+    , af_randomAccess :: !Bool
+    , af_priority     :: !Bool
+    , af_pcr          :: !Bool
+    , af_opcr         :: !Bool
+    , af_splice       :: !Bool
+    , af_transportPrivateData :: !Bool
+    , af_extension    :: !Bool
+    }
+
+defaultAdaptationFlags =
+  AdaptationFlags False False False False False
+                  False False False
+
+instance Show AdaptationFlags where
+  show (AdaptationFlags d r p pcr opcr spl tpd e) =
+      (t d 'D')   : (t p 'P') : (t pcr 'C') : (t opcr 'O') : (t spl 'S') :
+      (t tpd 'P') : (t e 'E') : []
+          where
+            t f c = case f of
+                True  -> c
+                False -> '-'
+
+data AdaptationField = AdaptationField
+    { ad_len      :: !Int
+    , ad_flags    :: !AdaptationFlags
+    , ad_pcr      :: !(Maybe Int)
+    , ad_opcr     :: !(Maybe Int)
+    , ad_splice   :: !Int
+    } deriving (Show)
+
+defaultAdaptationField = AdaptationField 0 defaultAdaptationFlags Nothing Nothing 0
+
+{-
+Decode the Adaptation Field
+-}
+adaptationField :: G.Get AdaptationField
+adaptationField = return $ defaultAdaptationField
+
+{-
+Decode the TS Packet Header
+-}
+tsHeader :: BG.BitGet TSHeader
+tsHeader = do
+  tei  <- BG.getBit
+  pusi <- BG.getBit
+  tp   <- BG.getBit
+  pid  <- BG.getAsWord16 13
+  tsc  <- BG.getAsWord8 2
+  ad   <- BG.getAsWord8 2
+  cc   <- BG.getAsWord8 4
+
+  return $ TSHeader tei pusi tp pid tsc ad cc
 
 {-
 Decode the MpegTS Packets
 -}
-tsPacketParser :: Get TransportPacket
+tsPacketParser :: G.Get TransportPacket
 tsPacketParser = do
-    checkSyncByte
-    (tei, pusi, tp, pid, tsc, ad, cc) <- parseHeader
-    let pack = TransportPacket tei pusi tp pid tsc ad cc
-    case ad of
-      0 -> fail (show (pack Nothing Nothing) ++ ": wrong adaptation field code")
+
+  checkSyncByte
+
+  hb <- G.getByteString 3
+
+  let header = BG.runBitGet hb tsHeader
+  case header of
+    Left error -> fail error
+    Right x -> case (adaptation_field_control x) of
+      0 -> fail (show (TransportPacket x Nothing Nothing) ++ ": wrong adaptation field code")
       2 -> do af <- adaptationField
-              skip (184-(ad_len af)-1)
-              return$ pack (Just af) Nothing
+              G.skip (184 - (ad_len af) - 1)
+              return $ TransportPacket x (Just af) Nothing
       3 -> do af <- adaptationField
-              d  <- getByteString (184-(ad_len af)-1)
-              return$ pack (Just af) (Just d)
-      _ -> do d <- getByteString 184
-              return$ pack Nothing (Just d)
-    where
-      checkSyncByte = do
-        sync <- getWord8
-        when (sync /= 0x47) (fail$ "bad sync byte " ++ show sync) -- checkSyncByte
-      parseHeader = do
-        chunk <- getWord16be
-        let tei  = (0x8000 .&. chunk) == 0x8000
-            pusi = (0x4000 .&. chunk) == 0x4000
-            tp   = (0x2000 .&. chunk) == 0x2000
-            pid  = 0x1FFF .&. chunk
-        byte <- getWord8
-        let tsc = (shiftR byte 6) .&. 0x03
-            ad = (shiftR byte 4) .&. 0x03
-            cc = (0x0F .&. byte)
-        return (tei, pusi, tp, pid, tsc, ad, cc)
+              d  <- G.getByteString (184 - (ad_len af) - 1)
+              return $ TransportPacket x (Just af) (Just d)
+      _ -> do d <- G.getByteString 184
+              return $ TransportPacket x Nothing (Just d)
 
+  where
+  checkSyncByte = do
+    sync <- G.getWord8
+    when (sync /= 0x47) (fail $ "bad sync byte " ++ show sync) -- checkSyncByte
 
-tsPacketList :: BL.ByteString -> ByteOffset -> [TransportPacket]
-tsPacketList bytestring offset =
-  let (x, rest, i) = runGetState tsPacketParser bytestring offset
+{-
+Get a list of TS Packets
+-}
+tsPacketList :: BS.ByteString -> [TransportPacket]
+tsPacketList bytestring =
+  let (x, rest) = G.runGet tsPacketParser bytestring
     in
-    if rest == BL.empty
-      then x:[]
-    else
-      x:(tsPacketList rest i)
+    if rest == BS.empty
+      then case x of
+        Left error -> fail error
+        Right x -> x:[]
+
+      else case x of
+        Left error -> fail error
+        Right x -> x:(tsPacketList rest)
+{-
+Print out the TS Packets
+-}
+printTsPacketList :: BS.ByteString -> Int -> IO ()
+printTsPacketList bytestring count =
+  let (x, rest) = G.runGet tsPacketParser bytestring
+    in
+    if rest == BS.empty
+      then do
+        putStrLn $ "P" ++ show x
+        putStrLn $ "Total: " ++ show count
+      else do
+        putStrLn $ "P" ++ show x
+        printTsPacketList rest (count + 1)

@@ -3,7 +3,7 @@ module Main where
 import System.IO
 import Media.MpegTs
 import Options.Applicative
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString as BS
 
 {-
 Data type to hold the command line optio
@@ -30,8 +30,8 @@ run :: Options -> IO ()
 run opts = do
   putStrLn $ "Reading file " ++ (input opts)
   withBinaryFile (input opts) ReadMode (\handle -> do
-      input <- BL.hGetContents handle
-      putStrLn $ show (tsPacketList input 0)
+      input <- BS.hGetContents handle
+      putStrLn $ show (tsPacketList input)
       putStrLn "done.")
 
 main :: IO ()
