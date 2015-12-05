@@ -107,7 +107,7 @@ Decode the Adaptation Field
 -}
 adaptationField :: BG.BitGet AdaptationField
 adaptationField = do
-  length <- BG.getWord8
+  let length = G.remaining
   discontinuity_indicator <- BG.getBit
   random_access_indicator <- BG.getBit
   elementary_stream_priority_indicator <- BG.getBit
