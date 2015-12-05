@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 module Media.MpegTs
     ( tsPacketList
+    , printTsPacketList
     ) where
 
 import qualified Data.ByteString as BS
@@ -20,7 +21,6 @@ type TransportError = Bool
 type PayloadStart = Bool
 type TransportPriority = Bool
 type TransportScramblingControl = Word8
-type AdaptationFieldControl = Word8
 type ContinuityCount = Word8
 
 data TSHeader = TSHeader
@@ -33,7 +33,7 @@ data TSHeader = TSHeader
   , continuity_counter           :: !ContinuityCount
   } deriving (Show)
 
-defaultTSHeader = TSHeader False False False 0 0 0 0
+defaultTSHeader = TSHeader False False False 0 0 Reserved 0
 
 data TransportPacket = TransportPacket
   { header                       :: TSHeader
@@ -77,6 +77,12 @@ data AdaptationField = AdaptationField
 
 defaultAdaptationField = AdaptationField 0 defaultAdaptationFlags Nothing Nothing 0
 
+{--
+Adaptation Field Control Flags
+-}
+data AdaptationFieldControl = Reserved | Payload_Only | Adaptation_Field_Only | Adaptation_Field_And_Payload
+  deriving (Enum, Show, Eq, Ord, Bounded)
+
 {-
 Decode the Adaptation Field
 -}
@@ -93,7 +99,7 @@ tsHeader = do
   tp   <- BG.getBit
   pid  <- BG.getAsWord16 13
   tsc  <- BG.getAsWord8 2
-  ad   <- BG.getAsWord8 2
+  ad   <- toEnum <$> (fromIntegral <$> BG.getAsWord8 2) :: BG.BitGet AdaptationFieldControl
   cc   <- BG.getAsWord8 4
 
   return $ TSHeader tei pusi tp pid tsc ad cc
@@ -112,15 +118,18 @@ tsPacketParser = do
   case header of
     Left error -> fail error
     Right x -> case (adaptation_field_control x) of
-      0 -> fail (show (TransportPacket x Nothing Nothing) ++ ": wrong adaptation field code")
-      2 -> do af <- adaptationField
-              G.skip (184 - (ad_len af) - 1)
-              return $ TransportPacket x (Just af) Nothing
-      3 -> do af <- adaptationField
-              d  <- G.getByteString (184 - (ad_len af) - 1)
-              return $ TransportPacket x (Just af) (Just d)
-      _ -> do d <- G.getByteString 184
-              return $ TransportPacket x Nothing (Just d)
+      Reserved -> fail (show (TransportPacket x Nothing Nothing) ++ ": wrong adaptation field code")
+      Adaptation_Field_Only -> do
+        af <- adaptationField
+        G.skip (184 - (ad_len af) - 1)
+        return $ TransportPacket x (Just af) Nothing
+      Adaptation_Field_And_Payload -> do
+        af <- adaptationField
+        d  <- G.getByteString (184 - (ad_len af) - 1)
+        return $ TransportPacket x (Just af) (Just d)
+      _ -> do
+        d <- G.getByteString 184
+        return $ TransportPacket x Nothing (Just d)
 
   where
   checkSyncByte = do
@@ -151,8 +160,17 @@ printTsPacketList bytestring count =
     in
     if rest == BS.empty
       then do
-        putStrLn $ "P" ++ show x
+        case x of
+          Left error -> putStrLn $ "F:" ++ show error
+          Right x -> putStrLn $ "P:" ++ show x
+
         putStrLn $ "Total: " ++ show count
+
       else do
-        putStrLn $ "P" ++ show x
+        case x of
+          Left error -> do
+            putStrLn $ "F:" ++ show error
+            fail error
+          Right x -> putStrLn $ "P:" ++ show x
+
         printTsPacketList rest (count + 1)
