@@ -31,7 +31,8 @@ run opts = do
   putStrLn $ "Reading file " ++ (input opts)
   withBinaryFile (input opts) ReadMode (\handle -> do
       input <- BS.hGetContents handle
-      putStrLn $ show (tsPacketList input)
+--      putStrLn $ show (tsPacketList input)
+      printTsPacketList input 0
       putStrLn "done.")
 
 main :: IO ()
