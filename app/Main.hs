@@ -1,7 +1,7 @@
 module Main where
 
 import System.IO
-import Media.MpegTs
+import qualified Media.MpegTs.Decoder as D
 import Options.Applicative
 import qualified Data.ByteString as BS
 
@@ -32,7 +32,7 @@ run opts = do
   withBinaryFile (input opts) ReadMode (\handle -> do
       input <- BS.hGetContents handle
 --      putStrLn $ show (tsPacketList input)
-      printTsPacketList input 0
+      D.printTsPacketList input 0
       putStrLn "done.")
 
 main :: IO ()

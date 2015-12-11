@@ -11,6 +11,10 @@ module Media.MpegTs.AdaptationField (
     -- * Types
     , AdaptationFlags(..)
     , ProgramClockReference(..)
+    , AdaptationFieldExtension(..)
+    , LegalTimeWindow(..)
+    , SeamlessSplice(..)
+
 )  where
 
 import qualified Data.ByteString as BS
@@ -22,17 +26,38 @@ import Data.Bits
 type PCRBase = Word64
 type PCRExtension = Word16
 
-type AdaptationFieldExtension = BS.ByteString
+type LTWOffset = Word16
+
+data LegalTimeWindow = LegalTimeWindow
+  { valid_flag :: !Bool
+  , offset :: !LTWOffset
+  } deriving (Show, Eq)
+
+type PiecewiseRate = Word32
+
+type SpliceType = Word8
+type DTS = Word64
+
+data SeamlessSplice = SeamlessSplice
+  { splice_type :: !SpliceType
+  , dts_next_au :: !DTS
+  } deriving (Show, Eq)
+
+data AdaptationFieldExtension = AdaptationFieldExtension
+  { ltw             :: !(Maybe LegalTimeWindow)
+  , piecewise_rate  :: !(Maybe PiecewiseRate)
+  , seamless_splice :: !(Maybe SeamlessSplice)
+  } deriving (Show, Eq)
 
 data AdaptationFlags = AdaptationFlags
-    { af_discont      :: !Bool
-    , af_randomAccess :: !Bool
-    , af_priority     :: !Bool
-    , af_pcr          :: !Bool
-    , af_opcr         :: !Bool
-    , af_splice       :: !Bool
+    { af_discont              :: !Bool
+    , af_randomAccess         :: !Bool
+    , af_priority             :: !Bool
+    , af_pcr                  :: !Bool
+    , af_opcr                 :: !Bool
+    , af_splice               :: !Bool
     , af_transportPrivateData :: !Bool
-    , af_extension    :: !Bool
+    , af_extension            :: !Bool
     } deriving (Eq)
 
 defaultAdaptationFlags =
@@ -41,8 +66,8 @@ defaultAdaptationFlags =
 
 instance Show AdaptationFlags where
   show (AdaptationFlags d r p pcr opcr spl tpd e) =
-      (t d 'D')   : (t p 'P') : (t pcr 'C') : (t opcr 'O') : (t spl 'S') :
-      (t tpd 'P') : (t e 'E') : []
+      (t d 'D')    : (t r 'R')   : (t p 'P')   : (t pcr 'C') :
+      (t opcr 'O') : (t spl 'S') : (t tpd 'P') : (t e 'E')   : []
           where
             t f c = case f of
                 True  -> c
@@ -64,18 +89,93 @@ data ProgramClockReference = ProgramClockReference
   } deriving (Eq, Show)
 
 {-
+Decode the Legal Time Window
+-}
+legalTimeWindow :: BG.BitGet LegalTimeWindow
+legalTimeWindow = do
+  ltw_valid_flag <- BG.getBit
+  ltw_offset <- BG.getAsWord16 15
+
+  return $ LegalTimeWindow ltw_valid_flag ltw_offset
+
+{-
+Decode the Piecewise Rate
+-}
+piecewiseRate :: BG.BitGet PiecewiseRate
+piecewiseRate = do
+  BG.skip 2
+  rate <- BG.getAsWord32 22
+  return $ rate
+
+{-
+Decode the Seamless Splice
+-}
+seamlessSplice :: BG.BitGet SeamlessSplice
+seamlessSplice = do
+  splice_type <- BG.getAsWord8 4
+  dts_next_32_30 <- BG.getAsWord64 3
+  BG.skip 1
+  dts_next_29_15 <- BG.getAsWord64 15
+  BG.skip 1
+  dts_next_14_0 <- BG.getAsWord64 15
+  BG.skip 1
+
+  let dts_next_au = (shiftL dts_next_32_30 30) .|. (shiftL dts_next_29_15 15) .|. dts_next_14_0
+
+  return $ SeamlessSplice splice_type dts_next_au
+
+{-
 Decode PCR values
-  -}
+-}
 pcrValue :: BG.BitGet ProgramClockReference
 pcrValue = do
   base <- BG.getAsWord64 33
-  reserved <- BG.getAsWord8 6
+  BG.skip 6
   extension <- BG.getAsWord16 9
 
   return $ ProgramClockReference base extension
 
 adaptationFieldExtension :: BG.BitGet AdaptationFieldExtension
-adaptationFieldExtension =  BG.remaining >>= BG.getLeftByteString
+adaptationFieldExtension = do
+  ltw_flag <- BG.getBit
+  piecewise_rate_flag <- BG.getBit
+  seamless_splice_flag <- BG.getBit
+  BG.skip 5
+
+  ltw <- if ltw_flag
+    then do
+      ltw_data <- BG.getLeftByteString 16
+      let ltw_result = BG.runBitGet ltw_data legalTimeWindow
+
+      case ltw_result of
+        Left error -> fail error
+        Right x -> return $ Just x
+    else
+      return Nothing
+
+  piecewise_rate <- if piecewise_rate_flag
+    then do
+      piecewise_rate_data <- BG.getLeftByteString 24
+      let result = BG.runBitGet piecewise_rate_data piecewiseRate
+
+      case result of
+        Left error -> fail error
+        Right x -> return $ Just x
+    else
+      return Nothing
+
+  seamless_splice <- if seamless_splice_flag
+    then do
+      seamless_splice_data <- BG.getLeftByteString 40
+      let result = BG.runBitGet seamless_splice_data seamlessSplice
+
+      case result of
+        Left error -> fail error
+        Right x -> return $ Just x
+    else
+      return Nothing
+
+  return $ AdaptationFieldExtension ltw piecewise_rate seamless_splice
 
 {-
 Decode the Adaptation Field
