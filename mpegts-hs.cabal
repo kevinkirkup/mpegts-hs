@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Media.MpegTs.Decoder,
+  exposed-modules:     Media.MpegTs.Packet,
                        Media.MpegTs.AdaptationField
   build-depends:       base >= 4.7 && < 5
                      , binary

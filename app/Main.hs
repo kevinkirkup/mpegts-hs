@@ -1,7 +1,7 @@
 module Main where
 
 import System.IO
-import qualified Media.MpegTs.Decoder as D
+import qualified Media.MpegTs.Packet as P
 import Options.Applicative
 import qualified Data.ByteString as BS
 
@@ -31,8 +31,12 @@ run opts = do
   putStrLn $ "Reading file " ++ (input opts)
   withBinaryFile (input opts) ReadMode (\handle -> do
       input <- BS.hGetContents handle
+      let packets = P.tsPacketList input
+      let pid_packets = filter (\p -> (P.ts_pid $ P.header p) == 256) packets
+      putStrLn $ show pid_packets
+
 --      putStrLn $ show (tsPacketList input)
-      D.printTsPacketList input 0
+--      P.printTsPacketList input 0
       putStrLn "done.")
 
 main :: IO ()

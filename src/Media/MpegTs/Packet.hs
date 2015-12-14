@@ -1,7 +1,10 @@
 {-# LANGUAGE BangPatterns #-}
-module Media.MpegTs.Decoder (
-      tsPacketList
+module Media.MpegTs.Packet
+    ( tsPacketList
     , printTsPacketList
+    -- External Types
+    , TransportPacket(..)
+    , TSHeader(..)
     ) where
 
 import Media.MpegTs.AdaptationField
