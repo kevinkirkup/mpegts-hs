@@ -6,15 +6,13 @@ resolver: lts-3.15
 # Local packages, usually specified by relative directory name
 packages:
 - '.'
-- location:
-    git: git@github.com:KrzyStar/binary-low-level.git
-    commit: f38507db6c03111c86e99dd8c0f5183fca2fa9ad
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps:
   - text-format-simple-1.1.0
   - bytestring-0.10.6.0
   - binary-0.7.5.0
+  - binary-strict-0.4.8.3
 
 # Override default flag values for local packages and extra-deps
 flags: {}
