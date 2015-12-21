@@ -16,7 +16,8 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Media.MpegTs.Packet,
-                       Media.MpegTs.AdaptationField
+                       Media.MpegTs.AdaptationField,
+                       Media.MpegTs.Pes
   build-depends:       base >= 4.7 && < 5
                      , binary
                      , binary-strict
